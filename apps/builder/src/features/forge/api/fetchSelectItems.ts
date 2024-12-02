@@ -1,27 +1,27 @@
-import prisma from '@typebot.io/lib/prisma'
-import { authenticatedProcedure } from '@/helpers/server/trpc'
-import { TRPCError } from '@trpc/server'
-import { z } from 'zod'
-import { isReadWorkspaceFobidden } from '@/features/workspace/helpers/isReadWorkspaceFobidden'
-import { forgedBlocks } from '@typebot.io/forge-schemas'
-import { decrypt } from '@typebot.io/lib/api/encryption/decrypt'
+import { isReadWorkspaceFobidden } from "@/features/workspace/helpers/isReadWorkspaceFobidden";
+import { authenticatedProcedure } from "@/helpers/server/trpc";
+import { TRPCError } from "@trpc/server";
+import { forgedBlockIds } from "@typebot.io/forge-repository/constants";
+import { forgedBlocks } from "@typebot.io/forge-repository/definitions";
+import { decrypt } from "@typebot.io/lib/api/encryption/decrypt";
+import prisma from "@typebot.io/prisma";
+import { z } from "@typebot.io/zod";
+import { getFetchers } from "../helpers/getFetchers";
 
 export const fetchSelectItems = authenticatedProcedure
   .input(
     z.object({
-      integrationId: z.string(),
+      integrationId: z.enum(forgedBlockIds),
       fetcherId: z.string(),
       options: z.any(),
       workspaceId: z.string(),
-    })
+    }),
   )
   .query(
     async ({
       input: { workspaceId, integrationId, fetcherId, options },
       ctx: { user },
     }) => {
-      if (!options.credentialsId) return { items: [] }
-
       const workspace = await prisma.workspace.findFirst({
         where: { id: workspaceId },
         select: {
@@ -30,45 +30,47 @@ export const fetchSelectItems = authenticatedProcedure
               userId: true,
             },
           },
-          credentials: {
-            where: {
-              id: options.credentialsId,
-            },
-            select: {
-              id: true,
-              data: true,
-              iv: true,
-            },
-          },
+          credentials: options.credentialsId
+            ? {
+                where: {
+                  id: options.credentialsId,
+                },
+                select: {
+                  id: true,
+                  data: true,
+                  iv: true,
+                },
+              }
+            : undefined,
         },
-      })
+      });
 
       if (!workspace || isReadWorkspaceFobidden(workspace, user))
         throw new TRPCError({
-          code: 'NOT_FOUND',
-          message: 'No workspace found',
-        })
+          code: "NOT_FOUND",
+          message: "No workspace found",
+        });
 
-      const credentials = workspace.credentials.at(0)
+      const credentials = workspace.credentials?.at(0);
 
-      if (!credentials) return { items: [] }
+      const credentialsData = credentials
+        ? await decrypt(credentials.data, credentials.iv)
+        : undefined;
 
-      const credentialsData = await decrypt(credentials.data, credentials.iv)
+      const blockDef = forgedBlocks[integrationId];
 
-      const blockDef = forgedBlocks.find((b) => b.id === integrationId)
+      const fetcher = getFetchers(blockDef).find(
+        (fetcher) => fetcher.id === fetcherId,
+      );
 
-      const fetchers = (blockDef?.fetchers ?? []).concat(
-        blockDef?.actions.flatMap((action) => action.fetchers ?? []) ?? []
-      )
-      const fetcher = fetchers.find((fetcher) => fetcher.id === fetcherId)
-
-      if (!fetcher) return { items: [] }
+      if (!fetcher) return { items: [] };
 
       return {
         items: await fetcher.fetch({
-          credentials: credentialsData,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          credentials: credentialsData as any,
           options,
         }),
-      }
-    }
-  )
+      };
+    },
+  );

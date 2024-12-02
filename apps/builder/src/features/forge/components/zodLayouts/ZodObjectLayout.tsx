@@ -1,21 +1,22 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import {
   Accordion,
-  AccordionItem,
   AccordionButton,
   AccordionIcon,
+  AccordionItem,
   AccordionPanel,
   Stack,
   Text,
-} from '@chakra-ui/react'
-import { z } from '@typebot.io/forge/zod'
-import React from 'react'
-import { ZodLayoutMetadata } from '@typebot.io/forge/zod'
-import { ReactNode } from 'react'
-import { ZodTypeAny } from 'zod'
-import { ZodFieldLayout } from './ZodFieldLayout'
-import { ForgedBlockDefinition, ForgedBlock } from '@typebot.io/forge-schemas'
-import { getZodInnerSchema } from '../../helpers/getZodInnerSchema'
+} from "@chakra-ui/react";
+import type { ForgedBlockDefinition } from "@typebot.io/forge-repository/definitions";
+import type { ForgedBlock } from "@typebot.io/forge-repository/schemas";
+import { evaluateIsHidden } from "@typebot.io/forge/helpers/evaluateIsHidden";
+import type { ZodLayoutMetadata } from "@typebot.io/zod";
+import React from "react";
+import type { ReactNode } from "react";
+import type { ZodTypeAny, z } from "zod";
+import { getZodInnerSchema } from "../../helpers/getZodInnerSchema";
+import { ZodFieldLayout } from "./ZodFieldLayout";
 
 export const ZodObjectLayout = ({
   schema,
@@ -26,39 +27,42 @@ export const ZodObjectLayout = ({
   blockOptions,
   onDataChange,
 }: {
-  schema: z.ZodObject<any>
-  data: any
-  isInAccordion?: boolean
-  ignoreKeys?: string[]
-  blockDef?: ForgedBlockDefinition
-  blockOptions?: ForgedBlock['options']
-  onDataChange: (value: any) => void
+  schema: z.ZodObject<any>;
+  data: any;
+  isInAccordion?: boolean;
+  ignoreKeys?: string[];
+  blockDef?: ForgedBlockDefinition;
+  blockOptions?: ForgedBlock["options"];
+  onDataChange: (value: any) => void;
 }): ReactNode[] => {
-  const layout = getZodInnerSchema(schema)._def.layout
-  if (layout?.isHidden) return []
-  return Object.keys(schema.shape).reduce<{
-    nodes: ReactNode[]
-    accordionsCreated: string[]
+  const innerSchema = getZodInnerSchema(schema);
+  const shape =
+    "shape" in innerSchema ? innerSchema.shape : innerSchema._def.shape();
+  const layout = innerSchema._def.layout;
+  if (evaluateIsHidden(layout?.isHidden, blockOptions)) return [];
+  return Object.keys(shape).reduce<{
+    nodes: ReactNode[];
+    accordionsCreated: string[];
   }>(
     (nodes, key, index) => {
-      if (ignoreKeys?.includes(key)) return nodes
-      const keySchema = getZodInnerSchema(schema.shape[key])
+      if (ignoreKeys?.includes(key)) return nodes;
+      const keySchema = getZodInnerSchema(shape[key]);
       const layout = keySchema._def.layout as
         | ZodLayoutMetadata<ZodTypeAny>
-        | undefined
+        | undefined;
 
-      if (layout?.isHidden) return nodes
+      if (evaluateIsHidden(layout?.isHidden, blockOptions)) return nodes;
       if (
         layout &&
         layout.accordion &&
         !isInAccordion &&
-        keySchema._def.typeName !== 'ZodArray'
+        keySchema._def.typeName !== "ZodArray"
       ) {
-        if (nodes.accordionsCreated.includes(layout.accordion)) return nodes
+        if (nodes.accordionsCreated.includes(layout.accordion)) return nodes;
         const accordionKeys = getObjectKeysWithSameAccordionAttr(
           layout.accordion,
-          schema
-        )
+          shape,
+        );
         return {
           nodes: [
             ...nodes.nodes,
@@ -74,7 +78,7 @@ export const ZodObjectLayout = ({
                   {accordionKeys.map((accordionKey, idx) => (
                     <ZodFieldLayout
                       key={accordionKey + idx}
-                      schema={schema.shape[accordionKey]}
+                      schema={shape[accordionKey]}
                       data={data?.[accordionKey]}
                       onDataChange={(val) =>
                         onDataChange({ ...data, [accordionKey]: val })
@@ -92,7 +96,7 @@ export const ZodObjectLayout = ({
             ...nodes.accordionsCreated,
             layout.accordion as string,
           ],
-        }
+        };
       }
 
       return {
@@ -109,21 +113,18 @@ export const ZodObjectLayout = ({
           />,
         ],
         accordionsCreated: nodes.accordionsCreated,
-      }
+      };
     },
-    { nodes: [], accordionsCreated: [] }
-  ).nodes
-}
+    { nodes: [], accordionsCreated: [] },
+  ).nodes;
+};
 
-const getObjectKeysWithSameAccordionAttr = (
-  accordion: string,
-  schema: z.ZodObject<any>
-) =>
-  Object.keys(schema.shape).reduce<string[]>((keys, currentKey) => {
-    const l = schema.shape[currentKey]._def.layout as
+const getObjectKeysWithSameAccordionAttr = (accordion: string, shape: any) =>
+  Object.keys(shape).reduce<string[]>((keys, currentKey) => {
+    const l = shape[currentKey]._def.layout as
       | ZodLayoutMetadata<ZodTypeAny>
-      | undefined
+      | undefined;
     return !l?.accordion || l.accordion !== accordion
       ? keys
-      : [...keys, currentKey]
-  }, [])
+      : [...keys, currentKey];
+  }, []);
